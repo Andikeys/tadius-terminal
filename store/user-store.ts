@@ -46,14 +46,42 @@ interface UserState {
   signOut: () => void;
 }
 
-// Never an identity fallback in practice — every field here is always
-// overwritten below with something derived from what was actually typed
-// into the auth form, on both Sign In and Sign Up.
+// Fallback only — every field is normally overwritten below with something
+// derived from what was actually typed into the auth form. `id` specifically
+// must NEVER be this constant for a real sign-in: it used to be, always,
+// for every single account, which is exactly what caused two different
+// people signing in on the same machine to land in the SAME backend
+// container (container-manager.ts keys everything off `userId`) and see
+// each other's files. deriveUserId() below fixes that; MOCK_SESSION.id only
+// survives as the absolute last resort if somehow no email came through at
+// all, which shouldn't be reachable given the auth form requires one.
 const MOCK_SESSION: TadiusUser = {
   id: "usr_001",
   name: "Learner",
   username: "learner",
 };
+
+/**
+ * There's no real backend/database yet — no password verification, no
+ * account table, nothing stopping someone from typing any email and
+ * "becoming" that account. What this DOES guarantee, with zero backend,
+ * is workspace isolation: the same email always maps to the same id
+ * (so signing back in returns you to the same container/filesystem you
+ * had before — real persistence, not a fresh box every time), and
+ * different emails always map to different ids (so two different people
+ * on the same machine never share a container). That's the actual bug
+ * being fixed here; real authentication (verifying the person typing the
+ * email IS that person) is a separate, still-open gap for when a real
+ * backend exists.
+ */
+function deriveUserId(email: string): string {
+  const cleaned = email
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `usr_${cleaned || "learner"}`;
+}
 
 /** No real backend to look up a name by email, so Sign In (which only
  * collects email + password) derives a plausible display name/username
@@ -87,6 +115,7 @@ export const useUserStore = create<UserState>((set) => ({
     set({
       user: {
         ...MOCK_SESSION,
+        id: details?.email ? deriveUserId(details.email) : MOCK_SESSION.id,
         name: details?.name || derived?.name || MOCK_SESSION.name,
         username: details?.username || derived?.username || MOCK_SESSION.username,
         ...(details?.email ? { email: details.email } : {}),
